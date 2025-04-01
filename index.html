@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preference Collector (Loadable)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Section for Loading Data -->
+    <div id="load-data-area">
+        <h1>Load Comparison Data</h1>
+        <div class="load-controls">
+            <label for="data-url-input">Data JSON URL:</label>
+            <input type="url" id="data-url-input" placeholder="https://example.com/data.json" size="50">
+            <button id="load-data-button">Load Data</button>
+        </div>
+        <p id="load-status-message"></p>
+    </div>
+
+    <!-- Main Application Area (Initially Hidden) -->
+    <div id="main-app-area" class="hidden">
+        <h1>Card Comparison</h1>
+
+        <div id="status-area">
+            <p id="status-message">Loading...</p>
+        </div>
+
+        <div id="comparison-area" class="hidden">
+            <div id="card-container">
+                <!-- Cards will be injected here -->
+            </div>
+            <form id="scoring-form">
+                <div class="scoring-inputs">
+                    <!-- Score inputs 1, 2, 3 -->
+                    <div class="score-input">
+                        <label for="score_1">Score 1 (0-10):</label>
+                        <input type="number" id="score_1" name="score_1" min="0" max="10" required>
+                    </div>
+                    <div class="score-input">
+                        <label for="score_2">Score 2 (0-10):</label>
+                        <input type="number" id="score_2" name="score_2" min="0" max="10" required>
+                    </div>
+                    <div class="score-input">
+                        <label for="score_3">Score 3 (0-10):</label>
+                        <input type="number" id="score_3" name="score_3" min="0" max="10" required>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <p id="validation-error" class="error-message hidden"></p>
+                    <button type="submit">Save Scores & Next</button>
+                </div>
+            </form>
+        </div>
+
+        <div id="completion-area" class="hidden">
+            <h2>All Comparisons Completed!</h2>
+            <p>You can now submit your results or reset.</p>
+            <p><span id="total-results-count">0</span> results collected.</p>
+        </div>
+
+        <div id="controls-area" class="hidden"> <!-- Also initially hidden -->
+            <button id="submit-to-server-button" disabled>Submit All Results to Server</button>
+            <span id="submit-status"></span>
+            <button id="reset-button">Reset Progress</button>
+        </div>
+    </div><!-- End #main-app-area -->
+
+    <script src="app.js"></script>
+</body>
+</html>

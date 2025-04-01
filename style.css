@@ -1,0 +1,239 @@
+/* style.css */
+body {
+    font-family: sans-serif;
+    line-height: 1.5;
+    margin: 20px;
+    background-color: #f8f9fa;
+    color: #333;
+}
+
+h1, h2 {
+    text-align: center;
+    color: #0056b3;
+}
+
+#load-data-area {
+    padding: 20px;
+    border: 1px solid #ccc;
+    background-color: #f8f9fa;
+    margin-bottom: 30px;
+    border-radius: 5px;
+    text-align: center;
+}
+
+#load-data-area h1 {
+     margin-top: 0;
+     color: #333;
+}
+
+.load-controls label {
+    margin-right: 10px;
+    font-weight: bold;
+}
+
+.load-controls input[type="url"] {
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-right: 10px;
+}
+
+.load-controls button {
+     padding: 8px 15px;
+     font-size: 1em; /* Slightly smaller than main buttons */
+     background-color: #28a745;
+     color: white;
+     border: none;
+     border-radius: 5px;
+     cursor: pointer;
+     transition: background-color 0.2s ease;
+}
+.load-controls button:hover {
+     background-color: #218838;
+}
+.load-controls button:disabled {
+    background-color: #aaa;
+    cursor: not-allowed;
+}
+
+
+#load-status-message {
+    margin-top: 15px;
+    font-style: italic;
+    min-height: 1.2em; /* Reserve space */
+}
+
+/* Ensure hidden class works */
+.hidden {
+    display: none;
+}
+
+#status-area, #controls-area {
+    text-align: center;
+    margin: 20px 0;
+    padding: 10px;
+    background-color: #e9ecef;
+    border-radius: 5px;
+}
+
+#comparison-area {
+    margin-bottom: 30px;
+}
+
+#card-container {
+    display: flex;
+    justify-content: space-around; /* Distribute space */
+    align-items: stretch; /* Make cards same height */
+    flex-wrap: wrap; /* Allow wrapping on small screens */
+    gap: 20px; /* Space between cards */
+    margin-bottom: 30px;
+}
+
+.card {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    padding: 15px;
+    background-color: #fff;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    width: calc(33% - 27px); /* Adjust width for 3 cards + gap */
+    min-width: 250px; /* Prevent cards from becoming too narrow */
+    display: flex;
+    flex-direction: column;
+}
+
+.card h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #555;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
+    width: 100%;
+    text-align: center;
+    font-size: 1.1em;
+}
+
+.card dl {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    flex-grow: 1; /* Allow dl to fill space */
+}
+
+.card dt {
+    font-weight: bold;
+    color: #666;
+    float: left;
+    clear: left;
+    width: 80px;
+    text-align: right;
+    margin-right: 10px;
+    font-size: 0.9em;
+}
+
+.card dd {
+    margin-left: 90px;
+    margin-bottom: 5px;
+    color: #333;
+    font-size: 0.9em;
+}
+
+.card img {
+    max-width: 150px;
+    height: auto;
+    margin: 10px auto 15px auto; /* Center image */
+    display: block;
+    border-radius: 4px;
+}
+
+/* Scoring Form */
+#scoring-form {
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.scoring-inputs {
+    display: flex;
+    justify-content: space-around;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.score-input {
+    text-align: center;
+}
+
+.score-input label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    font-size: 0.95em;
+}
+
+.score-input input[type="number"] {
+    width: 70px;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1em;
+    text-align: center;
+}
+/* Hide spinner buttons on number inputs */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield; /* Firefox */
+}
+
+
+.form-actions {
+    text-align: center;
+    margin-top: 10px;
+}
+
+.form-actions button, #controls-area button {
+    padding: 10px 25px;
+    font-size: 1.1em;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    margin: 5px;
+}
+
+.form-actions button:hover, #controls-area button:hover {
+    background-color: #0056b3;
+}
+
+#controls-area button:disabled {
+    background-color: #aaa;
+    cursor: not-allowed;
+}
+
+#reset-button {
+    background-color: #dc3545;
+}
+#reset-button:hover {
+    background-color: #c82333;
+}
+
+/* Utility */
+.hidden {
+    display: none;
+}
+.error-message {
+    color: #dc3545;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+#submit-status {
+    margin-left: 10px;
+    font-style: italic;
+}
