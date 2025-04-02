@@ -1,28 +1,34 @@
-// app.js
-
 document.addEventListener('DOMContentLoaded', () => {
 
     // --- Configuration ---
-    const POST_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbxWdUcvg8NjmBBasbQXqRWZm7DH9UyGevf7r6FHpN_1SOa99k5KXfSN-r5cSSl6lpIPrw/exec';
+    const POST_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbz_a4HaXLZJ4yeKzVC16cpb9nn8ofbvBjgB_OSmWSXaR3fHntem5sMn5vGjtCZ_p7s/exec';
     const STORAGE_KEY_INDEX = 'deck_currentIndex';
     const STORAGE_KEY_RESULTS = 'deck_results';
+    const STORAGE_KEY_USERNAME = 'deck_username';
     // Default URL for convenience during testing
-    const DEFAULT_DATA_URL = ""; // e.g., "https://gist.githubusercontent.com/..."
+    const DEFAULT_DATA_URL = "https://raw.githubusercontent.com/nf-osi/jobs/refs/heads/dataset_curation/dataset_curation/test/results.json"; // e.g., "https://gist.githubusercontent.com/..."
 
     // --- Global State Variables ---
     let cardSets = []; // Will hold data loaded from JSON -> [cardsA, cardsB, cardsC]
     let totalComparisons = 0;
     let dataIsValid = false; // Flag to track if data loaded successfully
+    let isSubmitting = false; // Flag to prevent multiple submissions
+    let username = ""; // Store the username
 
     // --- DOM Element References ---
     // Load Area
     const loadDataAreaEl = document.getElementById('load-data-area');
+    const usernameInput = document.getElementById('username-input');
     const dataUrlInput = document.getElementById('data-url-input');
     const loadDataButton = document.getElementById('load-data-button');
     const loadStatusMessageEl = document.getElementById('load-status-message');
     // Main App Area
     const mainAppAreaEl = document.getElementById('main-app-area');
     const statusMessageEl = document.getElementById('status-message');
+    const submitStatusEl = document.getElementById('submit-status');
+    const navigationAreaEl = document.getElementById('navigation-area');
+    const gotoIndexInput = document.getElementById('goto-index');
+    const gotoButton = document.getElementById('goto-button');
     const comparisonAreaEl = document.getElementById('comparison-area');
     const cardContainerEl = document.getElementById('card-container');
     const scoringFormEl = document.getElementById('scoring-form');
@@ -35,8 +41,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const completionAreaEl = document.getElementById('completion-area');
     const totalResultsCountEl = document.getElementById('total-results-count');
     const controlsAreaEl = document.getElementById('controls-area');
-    const submitToServerBtn = document.getElementById('submit-to-server-button');
-    const submitStatusEl = document.getElementById('submit-status');
     const resetButton = document.getElementById('reset-button');
 
     // --- State Management (localStorage) ---
@@ -46,44 +50,57 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     let currentDisplayOrder = [];
 
-    // Load/Save/Reset functions (mostly same, but load depends on loaded data)
+    // Load/Save/Reset functions
     function loadState() {
         try {
             const storedIndex = localStorage.getItem(STORAGE_KEY_INDEX);
             const storedResults = localStorage.getItem(STORAGE_KEY_RESULTS);
+            const storedUsername = localStorage.getItem(STORAGE_KEY_USERNAME);
 
             // Only load index if data has been loaded and validated
             currentState.currentIndex = (dataIsValid && storedIndex !== null) ? parseInt(storedIndex, 10) : 0;
             currentState.results = storedResults !== null ? JSON.parse(storedResults) : [];
+            username = storedUsername || "";
 
-            if (isNaN(currentState.currentIndex) || currentState.currentIndex < 0 ) {
-                 currentState.currentIndex = 0;
+            if (isNaN(currentState.currentIndex) || currentState.currentIndex < 0) {
+                currentState.currentIndex = 0;
             }
-             // Prevent index from going beyond available comparisons
+            // Prevent index from going beyond available comparisons
             if (dataIsValid && currentState.currentIndex > totalComparisons) {
                 currentState.currentIndex = totalComparisons;
             }
             if (!Array.isArray(currentState.results)) {
-                 currentState.results = [];
+                currentState.results = [];
+            }
+
+            // Update the goto index input to match current index
+            if (gotoIndexInput) {
+                gotoIndexInput.value = currentState.currentIndex + 1;
+                gotoIndexInput.max = totalComparisons;
             }
 
         } catch (e) {
             console.error("Error loading state from localStorage:", e);
             currentState = { currentIndex: 0, results: [] };
         }
-        // Update button state only if data is valid
-        if (dataIsValid) {
-             updateSubmitButtonState();
-        }
+        
+        // Update results count
+        updateResultsCount();
     }
 
     function saveState() {
-         // Only save if data is valid (prevents saving state for non-existent data)
+        // Only save if data is valid (prevents saving state for non-existent data)
         if (!dataIsValid) return;
         try {
             localStorage.setItem(STORAGE_KEY_INDEX, currentState.currentIndex.toString());
             localStorage.setItem(STORAGE_KEY_RESULTS, JSON.stringify(currentState.results));
-            updateSubmitButtonState();
+            localStorage.setItem(STORAGE_KEY_USERNAME, username);
+            updateResultsCount();
+            
+            // Update the goto index input
+            if (gotoIndexInput) {
+                gotoIndexInput.value = currentState.currentIndex + 1;
+            }
         } catch (e) {
             console.error("Error saving state to localStorage:", e);
             alert("Could not save progress. LocalStorage might be full or disabled.");
@@ -95,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 localStorage.removeItem(STORAGE_KEY_INDEX);
                 localStorage.removeItem(STORAGE_KEY_RESULTS);
+                localStorage.removeItem(STORAGE_KEY_USERNAME);
                 // Reloading the page is the simplest way to reset to the initial 'load data' state
                 window.location.reload();
             } catch (e) {
@@ -104,11 +122,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function updateSubmitButtonState() {
-         // Only enable if data is valid and there are results
-         const hasResults = currentState.results.length > 0;
-         submitToServerBtn.disabled = !(dataIsValid && hasResults);
-         totalResultsCountEl.textContent = currentState.results.length;
+    function updateResultsCount() {
+        totalResultsCountEl.textContent = currentState.results.length;
     }
 
     // --- Helper Functions ---
@@ -122,31 +137,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isMinimalCard(cardData) {
-        // Considered minimal if it has an ID but no name attribute
-        return cardData && cardData.hasOwnProperty('id') && !cardData.hasOwnProperty('name');
+        // Considered minimal if it has an ID but no title attribute
+        return cardData && cardData.hasOwnProperty('id') && !cardData.hasOwnProperty('title');
     }
 
     function capitalize(str) {
-        // ... (same as previous version)
         if (!str) return '';
         return str.charAt(0).toUpperCase() + str.slice(1);
     }
 
     // --- Rendering Functions ---
-    function renderCard(cardData) { // Removed 'label' parameter
+    function renderCard(cardData) {
         const cardEl = document.createElement('div');
         cardEl.className = 'card';
         const minimal = isMinimalCard(cardData);
-        let title = `Unknown Card (${cardData.id || 'No ID'})`; // Default title
-        let attributesHtml = '<p><i>Not Available</i></p>'; // Default attributes
+        let title = `<a href="https://www.synapse.org/Synapse:${cardData.id}">Dataset</a>`; 
+        let attributesHtml = '<p><i>This failed validation.</i></p>';
 
         if (!minimal) {
-            title = `${cardData.name} (${cardData.id || 'No ID'})`;
+            title = `<a href="https://www.synapse.org/Synapse:${cardData.id}">${cardData.title}</a>`; 
             attributesHtml = ''; // Reset for non-minimal cards
-             // Build attributes list only if not minimal
+            // Build attributes list only if not minimal
             for (const key in cardData) {
-                if (cardData.hasOwnProperty(key) && key !== 'id' && key !== 'name' && key !== 'img') {
-                    attributesHtml += `<dt>${capitalize(key)}:</dt><dd>${cardData[key]}</dd>`;
+                if (cardData.hasOwnProperty(key) && key !== 'id' && key !== 'title' && key !== 'img') {
+                    attributesHtml += `<dt>${capitalize(key)}</dt><dd>${cardData[key]}</dd>`;
                 }
             }
             if (!attributesHtml) { // Handle case where name exists but no other attributes
@@ -167,19 +181,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayComparison(index) {
-         // Guard against running if data isn't ready
+        // Guard against running if data isn't ready
         if (!dataIsValid) {
-             console.error("displayComparison called before data is ready.");
-             return;
+            console.error("displayComparison called before data is ready.");
+            return;
         }
 
         console.log(`displayComparison: Called with index ${index}. Total comparisons: ${totalComparisons}`);
         if (index >= 0 && index < totalComparisons) {
-            statusMessageEl.textContent = `Comparing Set ${index + 1} of ${totalComparisons}`;
+            statusMessageEl.textContent = `Comparing ${index + 1} of ${totalComparisons}`;
+            submitStatusEl.textContent = ""; // Clear any previous submission status
             cardContainerEl.innerHTML = '';
             scoringFormEl.reset();
             validationErrorEl.classList.add('hidden');
             validationErrorEl.textContent = '';
+
+            // Update navigation input
+            gotoIndexInput.value = index + 1;
 
             scoreInputs.forEach(input => {
                 input.readOnly = false;
@@ -211,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             comparisonAreaEl.classList.remove('hidden');
             completionAreaEl.classList.add('hidden');
+            navigationAreaEl.classList.remove('hidden');
             controlsAreaEl.classList.remove('hidden'); // Show controls when comparison starts
             if (scoreInputs[0]) scoreInputs[0].focus();
 
@@ -221,21 +240,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function displayCompletion() {
+        statusMessageEl.textContent = "All comparisons complete!";
+        comparisonAreaEl.classList.add('hidden');
+        completionAreaEl.classList.remove('hidden');
+        navigationAreaEl.classList.remove('hidden');
+        updateResultsCount(); // Update results count
+    }
 
     // --- Event Handlers ---
-    function handleScoreSubmit(event) {
+    async function handleScoreSubmit(event) {
         event.preventDefault();
-
+        
+        if (isSubmitting) {
+            return; // Prevent multiple submissions
+        }
+    
         const scores = {}; // Store scores by original index (0, 1, 2)
         let allScoresValid = true;
-
-         validationErrorEl.classList.add('hidden'); // Hide previous error
-
+    
+        validationErrorEl.classList.add('hidden'); // Hide previous error
+    
         // Read scores based on current display order
         currentDisplayOrder.forEach((item, displayIndex) => {
             const inputElement = scoreInputs[displayIndex];
             const score = parseInt(inputElement.value, 10);
-
+    
             // Validate only if not read-only (i.e., not a minimal card)
             if (!inputElement.readOnly) {
                 if (isNaN(score) || score < 0 || score > 10) {
@@ -245,16 +275,20 @@ document.addEventListener('DOMContentLoaded', () => {
             // Store score against the original card's index
             scores[item.originalIndex] = isNaN(score) ? null : score; // Use null if somehow NaN
         });
-
+    
         if (!allScoresValid) {
             validationErrorEl.textContent = "Please enter numbers between 0 and 10 for all active cards.";
             validationErrorEl.classList.remove('hidden');
             return;
         }
-
+    
+        // Get notes from the textarea
+        const notesText = document.getElementById('notes').value.trim();
+    
         // Record results, mapping scores back to original A, B, C
         const currentIndex = currentState.currentIndex;
         const result = {
+            user: username,
             comparisonIndex: currentIndex,
             cardA: cardSets[0][currentIndex], // Original card A data
             cardB: cardSets[1][currentIndex], // Original card B data
@@ -262,72 +296,100 @@ document.addEventListener('DOMContentLoaded', () => {
             scoreA: scores[0],              // Score given to original card A
             scoreB: scores[1],              // Score given to original card B
             scoreC: scores[2],              // Score given to original card C
+            notes: notesText,               // Notes from the textarea
             timestamp: new Date().toISOString()
         };
-        currentState.results.push(result);
-        currentState.currentIndex++;
-
-        saveState();
-        displayComparison(currentState.currentIndex);
-    }
-    
-    async function handleSubmitToServer() {
-        const resultsToSubmit = currentState.results;
-
-        if (resultsToSubmit.length === 0) {
-            submitStatusEl.textContent = "No results to submit.";
-            submitStatusEl.style.color = 'orange';
-            return;
-        }
-
-        submitToServerBtn.disabled = true;
-        resetButton.disabled = true; // Prevent reset during submit
-        submitStatusEl.textContent = "Submitting...";
-        submitStatusEl.style.color = 'blue';
-
-
+        
+        // Disable form during submission
+        isSubmitting = true;
+        const submitButton = scoringFormEl.querySelector('button[type="submit"]');
+        const originalButtonText = submitButton.textContent;
+        submitButton.textContent = "Submitting...";
+        submitButton.disabled = true;
+        
+        // Submit this single result to the server
         try {
-            const response = await fetch(POST_ENDPOINT_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    // Add any other headers like Authorization if needed
-                },
-                body: JSON.stringify(resultsToSubmit) // Send all collected results
-            });
-
-            if (response.ok) {
-                const responseData = await response.json(); // Or response.text() if not JSON
-                console.log("Server Response:", responseData);
-                submitStatusEl.textContent = "Results submitted successfully!";
+            submitStatusEl.textContent = "Submitting...";
+            submitStatusEl.style.color = 'blue';
+            
+            const success = await sendData([result]); // Send just this one result
+            
+            if (success) {
+                // Add to local results and advance to next comparison
+                currentState.results.push(result);
+                currentState.currentIndex++;
+                saveState();
+                
+                submitStatusEl.textContent = "Submission successful!";
                 submitStatusEl.style.color = 'green';
-                // Optional: Clear results after successful submission?
-                // currentState.results = [];
-                // saveState(); // If you clear results, save the empty state
+                
+                // Move to next comparison
+                displayComparison(currentState.currentIndex);
             } else {
-                // Handle HTTP errors (e.g., 404, 500)
-                const errorText = await response.text();
-                console.error("Server error:", response.status, response.statusText, errorText);
-                submitStatusEl.textContent = `Error: ${response.status} ${response.statusText}. Check console.`;
+                submitStatusEl.textContent = "Submission failed. Please try again.";
                 submitStatusEl.style.color = 'red';
             }
         } catch (error) {
-            // Handle network errors or issues with the fetch itself
-            console.error("Network or fetch error:", error);
-            submitStatusEl.textContent = "Network error. Could not submit.";
+            console.error("Error submitting data:", error);
+            submitStatusEl.textContent = "Error submitting data. Please try again.";
             submitStatusEl.style.color = 'red';
         } finally {
-            // Re-enable buttons regardless of success/failure
-            updateSubmitButtonState(); // Re-evaluates based on results array
-            resetButton.disabled = false;
-            // Maybe clear the status message after a few seconds
-            // setTimeout(() => { submitStatusEl.textContent = ''; }, 5000);
+            // Re-enable form
+            isSubmitting = false;
+            submitButton.textContent = originalButtonText;
+            submitButton.disabled = false;
         }
+    }
+
+    async function sendData(data) {
+        try {
+          const response = await fetch(POST_ENDPOINT_URL, {
+            method: 'POST',
+            mode: 'no-cors', // Prevents CORS errors but makes response unreadable
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+          });
+          
+          console.log('Request sent, but response is opaque due to no-cors mode');
+          return true;
+        } catch (error) {
+          console.error('Error:', error);
+          return false;
+        }
+    }
+    
+    function handleGotoIndex() {
+        if (!dataIsValid) return;
+        
+        const targetIndex = parseInt(gotoIndexInput.value, 10) - 1; // Convert from 1-based to 0-based
+        
+        if (isNaN(targetIndex) || targetIndex < 0 || targetIndex >= totalComparisons) {
+            alert(`Please enter a valid comparison number between 1 and ${totalComparisons}.`);
+            return;
+        }
+        
+        currentState.currentIndex = targetIndex;
+        saveState();
+        displayComparison(currentState.currentIndex);
     }
     
 
     // --- Data Loading ---
     async function loadDataFromUrl(url) {
+        // First validate username
+        const enteredUsername = usernameInput.value.trim();
+        if (!enteredUsername) {
+            loadStatusMessageEl.textContent = "Please enter a username before loading data.";
+            loadStatusMessageEl.style.color = 'red';
+            return;
+        }
+        
+        // Store the username
+        username = enteredUsername;
+        localStorage.setItem(STORAGE_KEY_USERNAME, username);
+        
         loadDataButton.disabled = true;
         loadStatusMessageEl.textContent = "Loading data...";
         loadStatusMessageEl.style.color = 'blue';
@@ -373,9 +435,14 @@ document.addEventListener('DOMContentLoaded', () => {
             loadDataAreaEl.classList.add('hidden');
             mainAppAreaEl.classList.remove('hidden');
 
+            // Set max value for goto index input
+            if (gotoIndexInput) {
+                gotoIndexInput.max = totalComparisons;
+                gotoIndexInput.value = 1; // Start at first comparison
+            }
+
             // Now initialize the application logic
             initializeAppLogic();
-
 
         } catch (error) {
             console.error("Failed to load or process data:", error);
@@ -384,7 +451,6 @@ document.addEventListener('DOMContentLoaded', () => {
             loadDataButton.disabled = false; // Re-enable button on error
         }
     }
-
 
     // --- Initialization Logic (Separated) ---
     function initializeAppLogic() {
@@ -403,12 +469,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Attach event listeners (only once)
         // Check if already attached to prevent duplicates if loading new data was possible
         if (!scoringFormEl.dataset.listenerAttached) {
-             scoringFormEl.addEventListener('submit', handleScoreSubmit);
-             resetButton.addEventListener('click', resetState);
-             submitToServerBtn.addEventListener('click', handleSubmitToServer);
-             scoringFormEl.dataset.listenerAttached = 'true'; // Mark as attached
-         }
-
+            scoringFormEl.addEventListener('submit', handleScoreSubmit);
+            resetButton.addEventListener('click', resetState);
+            gotoButton.addEventListener('click', handleGotoIndex);
+            scoringFormEl.dataset.listenerAttached = 'true'; // Mark as attached
+        }
 
         console.log("initializeAppLogic: Calling displayComparison for index", currentState.currentIndex);
         displayComparison(currentState.currentIndex); // Display current step
@@ -423,6 +488,12 @@ document.addEventListener('DOMContentLoaded', () => {
             dataUrlInput.value = DEFAULT_DATA_URL;
         }
 
+        // Try to load username from localStorage
+        const storedUsername = localStorage.getItem(STORAGE_KEY_USERNAME);
+        if (storedUsername) {
+            usernameInput.value = storedUsername;
+        }
+
         // Add listener for the load button
         loadDataButton.addEventListener('click', async () => {
             const url = dataUrlInput.value.trim();
@@ -433,11 +504,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadStatusMessageEl.style.color = 'orange';
             }
         });
-         // Note: We DO NOT call initializeAppLogic() here.
-         // It's only called after successful data load.
+        // Note: We DO NOT call initializeAppLogic() here.
+        // It's only called after successful data load.
     }
 
     // Start the page setup
     setupPage();
-
 });
