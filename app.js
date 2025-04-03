@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Configuration ---
     const POST_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbz_a4HaXLZJ4yeKzVC16cpb9nn8ofbvBjgB_OSmWSXaR3fHntem5sMn5vGjtCZ_p7s/exec';
+    const SYNAPSE_USER_PROFILE_URL = 'https://repo-prod.prod.sagebase.org/repo/v1/userProfile';
     const STORAGE_KEY_INDEX = 'deck_currentIndex';
     const STORAGE_KEY_RESULTS = 'deck_results';
     const STORAGE_KEY_USERNAME = 'deck_username';
@@ -13,12 +14,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let totalComparisons = 0;
     let dataIsValid = false; // Flag to track if data loaded successfully
     let isSubmitting = false; // Flag to prevent multiple submissions
+    let apiKey = ""; 
     let username = ""; // Store the username
 
     // --- DOM Element References ---
     // Load Area
     const loadDataAreaEl = document.getElementById('load-data-area');
-    const usernameInput = document.getElementById('username-input');
+    const apiKeyInput = document.getElementById('api-key-input');
     const dataUrlInput = document.getElementById('data-url-input');
     const loadDataButton = document.getElementById('load-data-button');
     const loadStatusMessageEl = document.getElementById('load-status-message');
@@ -144,6 +146,151 @@ document.addEventListener('DOMContentLoaded', () => {
     function capitalize(str) {
         if (!str) return '';
         return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    // --- Helper Functions for Synapse API ---
+
+    function getAnnotationValueType(value) {
+        if (value == null) return "STRING"; // null or undefined -> STRING type, value becomes []
+        const type = typeof value;
+        if (type === 'string') return "STRING";
+        if (type === 'boolean') return "BOOLEAN";
+        if (type === 'number') {
+          return Number.isInteger(value) ? "LONG" : "DOUBLE";
+        }
+        if (Array.isArray(value)) return "STRING";
+        return "STRING";
+      }
+
+    function asAnnotations(cardData) {
+        if (typeof cardData !== 'object' || cardData === null) {
+            console.error("Input must be a non-null object.");
+            return {};
+        }
+        
+        return Object.entries(cardData).reduce((accumulator, [key, originalValue]) => {
+            // Skip if the value is an object, null (unsupported as annotation value)
+            if (key === 'id' || typeof originalValue === 'object' && originalValue !== null && !Array.isArray(originalValue)) {
+                console.warn(`Skipping annotation key "${key}": value is an unsupported object.`);
+                return accumulator; // Don't add this key to the result
+            }
+        
+            const type = getAnnotationValueType(originalValue);
+            let valueArray;
+        
+            if (originalValue == null) { // Handle null and undefined
+            // Represent "no value" with empty array, type is STRING (as per getAnnotationValueType)
+            valueArray = [];
+            } else if (Array.isArray(originalValue)) {
+            // Convert each element to string, handles empty arrays correctly (value=[])
+            valueArray = originalValue.map(item => String(item));
+            } else {
+            // Scalar value: wrap in array and convert to string
+            valueArray = [String(originalValue)];
+            }
+        
+            accumulator[key] = {
+            type: type,
+            value: valueArray // This is now always an array of strings (or empty)
+            };
+        
+            return accumulator;
+        }, {}); // Start with an empty object accumulator
+    }
+    
+    // --- API Functions ---
+    async function validateApiKey(key) {
+        try {
+            const response = await fetch(SYNAPSE_USER_PROFILE_URL, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${key}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`API key validation failed: ${response.status} ${response.statusText}`);
+            }
+
+            const userData = await response.json();
+            if (!userData.userName) {
+                throw new Error('Invalid response from Synapse API');
+            }
+
+            return {
+                valid: true,
+                username: userData.userName
+            };
+        } catch (error) {
+            console.error('API key validation error:', error);
+            return {
+                valid: false,
+                error: error.message
+            };
+        }
+    }
+
+     // Function to get the highest-scoring card data for a given index
+     function getHighestScoringCard(scores, index) {
+        // Find the highest score
+        let highestScore = -1;
+        let highestIndex = -1;
+        
+        for (let i = 0; i < 3; i++) {
+            const score = scores[i];
+            if (score !== null && score > highestScore) {
+                highestScore = score;
+                highestIndex = i;
+            }
+        }
+        
+        // If we found a valid highest score
+        if (highestIndex >= 0 && highestIndex < cardSets.length) {
+            return {
+                card: cardSets[highestIndex][index],
+                score: highestScore,
+                setIndex: highestIndex // A, B, or C (0, 1, or 2)
+            };
+        }
+        
+        return null;
+    }
+
+    // This function would be implemented elsewhere
+    async function submitCardData(cardData, apiKey) {
+        id = cardData.id;
+        const entity = await fetch(`https://repo-prod.prod.sagebase.org/repo/v1/entity/${id}`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              }
+            });
+        
+        const entityData = await entity.json();
+        
+        let annotations = { 
+            "id": id, 
+            "etag": entityData.etag, 
+            "annotations": asAnnotations(cardData)}
+        
+        // console.log("Submitting", annotations)
+
+        response = await fetch(`https://repo-prod.prod.sagebase.org/repo/v1/entity/${id}/annotations2`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(annotations),
+        });
+
+        if (response.ok) {
+            console.log('Annotation submitted successfully');
+            return true;
+        } else {
+            console.error('Failed to submit annotation');
+        }
     }
 
     // --- Rendering Functions ---
@@ -312,18 +459,34 @@ document.addEventListener('DOMContentLoaded', () => {
             submitStatusEl.textContent = "Submitting...";
             submitStatusEl.style.color = 'blue';
             
-            const success = await sendData([result]); // Send just this one result
+            const success = await sendScoreData([result]); // Send just this one result
             
             if (success) {
-                // Add to local results and advance to next comparison
+                // Add to local results
                 currentState.results.push(result);
+
+                // Find the highest-scoring card and submit it
+                submitStatusEl.textContent = "Submitting highest-scoring card...";
+                const highestCard = getHighestScoringCard(scores, currentIndex);
+                
+                if (highestCard) {
+                    try {
+                        await submitCardData(highestCard.card, apiKey);
+                        submitStatusEl.textContent = "All submitted successfully!";
+                        submitStatusEl.style.color = 'green';
+                    } catch (cardError) {
+                        console.error("Error submitting card data:", cardError);
+                        submitStatusEl.textContent = "Scores submitted, but applying card data failed.";
+                        submitStatusEl.style.color = 'orange';
+                    }
+                } else {
+                    submitStatusEl.textContent = "Scores submitted, but no valid highest card found.";
+                    submitStatusEl.style.color = 'orange';
+                }
+                
+                // Advance to next comparison
                 currentState.currentIndex++;
                 saveState();
-                
-                submitStatusEl.textContent = "Submission successful!";
-                submitStatusEl.style.color = 'green';
-                
-                // Move to next comparison
                 displayComparison(currentState.currentIndex);
             } else {
                 submitStatusEl.textContent = "Submission failed. Please try again.";
@@ -341,7 +504,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function sendData(data) {
+    async function sendScoreData(data) {
         try {
           const response = await fetch(POST_ENDPOINT_URL, {
             method: 'POST',
@@ -378,20 +541,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Data Loading ---
     async function loadDataFromUrl(url) {
-        // First validate username
-        const enteredUsername = usernameInput.value.trim();
-        if (!enteredUsername) {
-            loadStatusMessageEl.textContent = "Please enter a username before loading data.";
+        const enteredApiKey = apiKeyInput.value.trim();
+        if (!enteredApiKey) {
+            loadStatusMessageEl.textContent = "Please enter a Synapse API key.";
             loadStatusMessageEl.style.color = 'red';
             return;
         }
         
-        // Store the username
-        username = enteredUsername;
-        localStorage.setItem(STORAGE_KEY_USERNAME, username);
-        
         loadDataButton.disabled = true;
         loadStatusMessageEl.textContent = "Loading data...";
+        loadStatusMessageEl.style.color = 'blue';
+        
+        // Validate the API key with Synapse
+        const validation = await validateApiKey(enteredApiKey);
+        
+        if (!validation.valid) {
+            loadStatusMessageEl.textContent = `API key validation failed: ${validation.error}`;
+            loadStatusMessageEl.style.color = 'red';
+            loadDataButton.disabled = false;
+            return;
+        }
+        
+        // Store the API key and username
+        apiKey = enteredApiKey;
+        username = validation.username;
+
+        loadStatusMessageEl.textContent = `Welcome, ${username}. Loading data...`;
         loadStatusMessageEl.style.color = 'blue';
         dataIsValid = false; // Assume invalid until successfully loaded
 
@@ -428,6 +603,9 @@ document.addEventListener('DOMContentLoaded', () => {
             totalComparisons = firstSetLength;
             dataIsValid = true; // Mark data as valid
 
+            // Save API key and username to localStorage
+            localStorage.setItem(STORAGE_KEY_USERNAME, username);
+            
             loadStatusMessageEl.textContent = `Successfully loaded ${totalComparisons} comparison sets.`;
             loadStatusMessageEl.style.color = 'green';
 
@@ -486,12 +664,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Set default URL if provided
         if (DEFAULT_DATA_URL) {
             dataUrlInput.value = DEFAULT_DATA_URL;
-        }
-
-        // Try to load username from localStorage
-        const storedUsername = localStorage.getItem(STORAGE_KEY_USERNAME);
-        if (storedUsername) {
-            usernameInput.value = storedUsername;
         }
 
         // Add listener for the load button
