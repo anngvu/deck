@@ -496,8 +496,8 @@ document.addEventListener('DOMContentLoaded', () => {
         editCardAreaEl.classList.add('hidden');
         comparisonAreaEl.classList.remove('hidden');
         
-        // Update the card display with current state
-        displayComparison(currentState.currentIndex);
+        // Update the card display with current state, but preserve order
+        displayComparison(currentState.currentIndex, true); // Pass true to preserve order
         
         console.log('Card update complete');
     }
@@ -848,14 +848,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return Object.keys(jsonSchema.properties);
     }
 
-    function displayComparison(index) {
+    function displayComparison(index, preserveOrder = false) {
         // Guard against running if data isn't ready
         if (!dataIsValid) {
             console.error("displayComparison called before data is ready.");
             return;
         }
-
-        console.log(`displayComparison: Called with index ${index}. Total comparisons: ${totalComparisons}`);
+    
+        console.log(`displayComparison: Called with index ${index}, preserveOrder: ${preserveOrder}. Total comparisons: ${totalComparisons}`);
         if (index >= 0 && index < totalComparisons) {
             statusMessageEl.textContent = `Comparing ${index + 1} of ${totalComparisons}`;
             submitStatusEl.textContent = ""; // Clear any previous submission status
@@ -863,22 +863,44 @@ document.addEventListener('DOMContentLoaded', () => {
             scoringFormEl.reset();
             validationErrorEl.classList.add('hidden');
             validationErrorEl.textContent = '';
-
+    
             // Update navigation input
             gotoIndexInput.value = index + 1;
-
+    
             scoreInputs.forEach(input => {
                 input.readOnly = false;
                 input.required = true;
             });
-
-            const cardsForComparison = cardSets.map((set, originalIndex) => ({
-                card: set[index],
-                originalIndex: originalIndex
-            }));
-
-            currentDisplayOrder = shuffleArray(cardsForComparison);
-
+    
+            // Only create a new display order if we're not preserving the current order
+            // or if there's no current display order
+            if (!preserveOrder || currentDisplayOrder.length === 0) {
+                const cardsForComparison = cardSets.map((set, originalIndex) => ({
+                    card: set[index],
+                    originalIndex: originalIndex
+                }));
+    
+                currentDisplayOrder = shuffleArray(cardsForComparison);
+                console.log("Created new shuffled display order");
+            } else {
+                // If preserving order, we need to update the card data in the current display order
+                // to reflect any changes that may have been made to the cards in the cardSets
+                for (let i = 0; i < currentDisplayOrder.length; i++) {
+                    const setIndex = currentDisplayOrder[i].originalIndex;
+                    const cardId = currentDisplayOrder[i].card.id;
+                    
+                    // Find the updated card data in the cardSets
+                    const updatedCard = cardSets[setIndex][index];
+                    if (updatedCard.id === cardId) {
+                        // Update the card in the display order with the current data
+                        currentDisplayOrder[i].card = updatedCard;
+                    } else {
+                        console.warn(`Card ID mismatch in display order update. Expected ${cardId}, found ${updatedCard.id}`);
+                    }
+                }
+                console.log("Preserved existing display order");
+            }
+    
             currentDisplayOrder.forEach((item, displayIndex) => {
                 const cardElement = renderCard(item.card, displayIndex);
                 if (cardElement) {
@@ -886,7 +908,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     console.error("renderCard returned null/undefined for item:", item);
                 }
-
+    
                 if (isMinimalCard(item.card)) {
                     const inputElement = scoreInputs[displayIndex];
                     inputElement.value = 0;
@@ -894,18 +916,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     inputElement.required = false;
                 }
             });
-
-            // Reset changedFields when displaying a new comparison
-            changedFields = [];
-            
-            // Hide edit area and show comparison area
-            editCardAreaEl.classList.add('hidden');
+    
             comparisonAreaEl.classList.remove('hidden');
             completionAreaEl.classList.add('hidden');
             navigationAreaEl.classList.remove('hidden');
             controlsAreaEl.classList.remove('hidden'); // Show controls when comparison starts
             if (scoreInputs[0]) scoreInputs[0].focus();
-
+    
         } else {
             displayCompletion();
             // Ensure controls are visible on completion too
