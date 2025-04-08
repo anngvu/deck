@@ -303,7 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- New Card Editing Functions ---
+    // --- Card Editing Functions ---
     
     // Function to load the JSON schema for the form
     async function loadJsonSchema() {
@@ -359,7 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
         comparisonAreaEl.classList.add('hidden');
         editCardAreaEl.classList.remove('hidden');
         
-        // Generate the form with our vanilla form generator
+        // Generate the form with vanilla form generator
         try {
             // Check if the form generator functions are available
             if (typeof generateFormFromSchema !== 'function') {
@@ -479,16 +479,6 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Update the card display
         displayComparison(currentState.currentIndex);
-    }
-    
-    // Function to handle going back to comparison view
-    function handleBackToComparison() {
-        // Cleanup
-        window.currentForm = null;
-        
-        // Return to comparison view
-        editCardAreaEl.classList.add('hidden');
-        comparisonAreaEl.classList.remove('hidden');
     }
     
     // --- Rendering Functions ---
@@ -887,6 +877,13 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("initializeAppLogic: Starting...");
         loadState(); // Load progress based on the now-valid data
         console.log("initializeAppLogic: State loaded. Current index:", currentState.currentIndex);
+
+        if (!scoringFormEl.dataset.listenerAttached) {
+            scoringFormEl.addEventListener('submit', handleScoreSubmit);
+            resetButton.addEventListener('click', resetState);
+            gotoButton.addEventListener('click', handleGotoIndex);
+            scoringFormEl.dataset.listenerAttached = 'true'; // Mark as attached
+        }
 
         if (backToComparisonBtn) {
             // Remove any existing listeners to prevent duplicates
