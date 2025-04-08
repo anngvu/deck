@@ -1,5 +1,3 @@
-// Add these imports at the top of app.js
-// We'll start by adding the new configuration for the schema URL
 document.addEventListener('DOMContentLoaded', () => {
 
     // --- Configuration ---
@@ -52,9 +50,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalResultsCountEl = document.getElementById('total-results-count');
     const controlsAreaEl = document.getElementById('controls-area');
     const resetButton = document.getElementById('reset-button');
-    // New elements for card editing
+    // Elements for card editing
     const editCardAreaEl = document.getElementById('edit-card-area');
-    const editCardFormEl = document.getElementById('edit-card-form');
+    const saveBtn = document.getElementById('save-card-changes');
     const backToComparisonBtn = document.getElementById('back-to-comparison');
     const saveCardChangesBtn = document.getElementById('save-card-changes');
 
@@ -269,7 +267,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    // This function would be implemented elsewhere
     async function submitCardData(cardData, apiKey) {
         id = cardData.id;
         const entity = await fetch(`https://repo-prod.prod.sagebase.org/repo/v1/entity/${id}`, {
@@ -351,58 +348,130 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
+        // Prepare the card data by filling in missing required fields with null values
+        const preparedCardData = fillMissingRequiredFields(cardData, jsonSchema);
+        
         // Save the original card data for comparison later
-        selectedCardForEditing = cardData;
-        originalCardData = JSON.parse(JSON.stringify(cardData)); // Deep copy
+        selectedCardForEditing = preparedCardData;
+        originalCardData = JSON.parse(JSON.stringify(preparedCardData)); // Deep copy
         
         // Hide comparison area and show edit area
         comparisonAreaEl.classList.add('hidden');
         editCardAreaEl.classList.remove('hidden');
         
-        // Update the form with the card data
-        const jsonSchemaForm = document.getElementById('json-schema-form');
-        
-        // Ensure the schema is properly set
-        if (jsonSchemaForm) {
-            console.log("Setting schema and data for form");
+        // Generate the form with our vanilla form generator
+        try {
+            // Check if the form generator functions are available
+            if (typeof generateFormFromSchema !== 'function') {
+                console.error("Form generator not loaded. Make sure form-generator.js is included.");
+                return;
+            }
             
-            // Set schema first, then data
-            setTimeout(() => {
-                jsonSchemaForm.schema = jsonSchema;
-                
-                // Set data after a small delay to ensure schema is loaded
-                setTimeout(() => {
-                    jsonSchemaForm.data = cardData;
-                    
-                    // Set up event handlers for the form
-                    jsonSchemaForm.onDataChange = (newData) => {
-                        console.info('Data changed:', newData);
-                        // We'll track changes when saving
-                    };
-                    
-                    jsonSchemaForm.onFormSubmit = (newData, valid) => {
-                        console.info('Form submitted:', { newData, valid });
-                        if (valid) {
-                            saveCardChanges(newData);
-                        }
-                    };
-                }, 100);
-            }, 100);
-        } else {
-            console.error("JSON Schema Form element not found");
+            console.log("Generating form from schema for:", preparedCardData);
+            
+            // Generate the form
+            const form = generateFormFromSchema(jsonSchema, preparedCardData, 'vanilla-form-container');
+            
+            // Store form reference for later access
+            window.currentForm = form;
+            
+            console.log("Form generated successfully");
+        } catch (error) {
+            console.error("Error generating form:", error);
         }
     }
 
+    // Helper function to fill in missing required fields with null values
+    function fillMissingRequiredFields(data, schema) {
+        // Create a deep copy of the data to avoid modifying the original
+        const filledData = JSON.parse(JSON.stringify(data));
+        
+        // If the schema has required fields, ensure they exist in the data
+        if (schema && schema.required && Array.isArray(schema.required)) {
+            schema.required.forEach(fieldName => {
+                if (!(fieldName in filledData)) {
+                    // Initialize missing required field with appropriate null value
+                    if (schema.properties && schema.properties[fieldName]) {
+                        const propType = schema.properties[fieldName].type;
+                        
+                        // Initialize with appropriate empty value based on type
+                        if (propType === 'string') {
+                            filledData[fieldName] = '';
+                        } else if (propType === 'array') {
+                            filledData[fieldName] = [];
+                        } else if (propType === 'object') {
+                            filledData[fieldName] = {};
+                        } else if (propType === 'number' || propType === 'integer') {
+                            filledData[fieldName] = null;
+                        } else if (propType === 'boolean') {
+                            filledData[fieldName] = false;
+                        } else {
+                            filledData[fieldName] = null;
+                        }
+                    } else {
+                        // Default to null if type information is not available
+                        filledData[fieldName] = null;
+                    }
+                    console.log(`Initialized missing required field: ${fieldName}`);
+                }
+            });
+        }
+        
+        // Also handle nested objects
+        if (schema && schema.properties) {
+            Object.keys(schema.properties).forEach(propName => {
+                const prop = schema.properties[propName];
+                
+                // If property is an object with its own properties, recursively process it
+                if (prop.type === 'object' && prop.properties) {
+                    // Make sure the property exists in data as an object
+                    if (!filledData[propName] || typeof filledData[propName] !== 'object') {
+                        filledData[propName] = {};
+                    }
+                    
+                    // Recursively fill missing fields in the nested object
+                    filledData[propName] = fillMissingRequiredFields(filledData[propName], prop);
+                }
+                
+                // If property is an array of objects, process each item
+                if (prop.type === 'array' && prop.items && prop.items.type === 'object') {
+                    if (Array.isArray(filledData[propName])) {
+                        filledData[propName] = filledData[propName].map(item => 
+                            fillMissingRequiredFields(item, prop.items)
+                        );
+                    }
+                }
+            });
+        }
+        
+        return filledData;
+    }
+    
     // Function to save changes made to the card
-    function saveCardChanges(newData) {
+    function saveCardChanges() {
+        if (!window.currentForm) {
+            console.error("Form not found");
+            return;
+        }
+        
+        // Extract data from the form
+        const formData = extractFormData(window.currentForm);
+        if (!formData) {
+            console.error("Could not extract form data");
+            return;
+        }
+        
         // Detect which fields were changed
-        changedFields = detectChanges(originalCardData, newData);
+        changedFields = detectChanges(originalCardData, formData);
         
         // Log the changes
         console.log('Changed fields:', changedFields);
         
         // Update the card data
-        Object.assign(selectedCardForEditing, newData);
+        Object.assign(selectedCardForEditing, formData);
+        
+        // Cleanup
+        window.currentForm = null;
         
         // Return to comparison view
         editCardAreaEl.classList.add('hidden');
@@ -411,7 +480,17 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update the card display
         displayComparison(currentState.currentIndex);
     }
-
+    
+    // Function to handle going back to comparison view
+    function handleBackToComparison() {
+        // Cleanup
+        window.currentForm = null;
+        
+        // Return to comparison view
+        editCardAreaEl.classList.add('hidden');
+        comparisonAreaEl.classList.remove('hidden');
+    }
+    
     // --- Rendering Functions ---
     function renderCard(cardData, displayIndex) {
         const cardEl = document.createElement('div');
@@ -809,29 +888,16 @@ document.addEventListener('DOMContentLoaded', () => {
         loadState(); // Load progress based on the now-valid data
         console.log("initializeAppLogic: State loaded. Current index:", currentState.currentIndex);
 
-        // Attach event listeners (only once)
-        // Check if already attached to prevent duplicates if loading new data was possible
-        if (!scoringFormEl.dataset.listenerAttached) {
-            scoringFormEl.addEventListener('submit', handleScoreSubmit);
-            resetButton.addEventListener('click', resetState);
-            gotoButton.addEventListener('click', handleGotoIndex);
-            scoringFormEl.dataset.listenerAttached = 'true'; // Mark as attached
-            
-            // Add event listeners for card editing
-            if (backToComparisonBtn) {
-                backToComparisonBtn.addEventListener('click', handleBackToComparison);
-            }
-            if (saveCardChangesBtn) {
-                saveCardChangesBtn.addEventListener('click', () => {
-                    const jsonSchemaForm = document.getElementById('json-schema-form');
-                    if (jsonSchemaForm.checkValidity()) {
-                        saveCardChanges(jsonSchemaForm.data);
-                    } else {
-                        jsonSchemaForm.reportValidity();
-                    }
-                });
-            }
+        if (backToComparisonBtn) {
+            // Remove any existing listeners to prevent duplicates
+            backToComparisonBtn.removeEventListener('click', handleBackToComparison);
+            backToComparisonBtn.addEventListener('click', handleBackToComparison);
         }
+        
+        if (saveCardChangesBtn) {
+            saveCardChangesBtn.removeEventListener('click', saveCardChanges);
+            saveCardChangesBtn.addEventListener('click', saveCardChanges);
+        }    
 
         console.log("initializeAppLogic: Calling displayComparison for index", currentState.currentIndex);
         displayComparison(currentState.currentIndex); // Display current step
@@ -854,36 +920,6 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 loadStatusMessageEl.textContent = "Please enter a valid URL.";
                 loadStatusMessageEl.style.color = 'orange';
-            }
-        });
-        
-        // Set up event listeners for the edit card area buttons
-        if (backToComparisonBtn) {
-            backToComparisonBtn.addEventListener('click', handleBackToComparison);
-        }
-        
-        if (saveCardChangesBtn) {
-            saveCardChangesBtn.addEventListener('click', () => {
-                const jsonSchemaForm = document.getElementById('json-schema-form');
-                if (jsonSchemaForm && jsonSchemaForm.checkValidity) {
-                    if (jsonSchemaForm.checkValidity()) {
-                        saveCardChanges(jsonSchemaForm.data);
-                    } else {
-                        jsonSchemaForm.reportValidity();
-                    }
-                } else {
-                    console.error("JSON Schema Form not fully initialized");
-                    alert("Form not ready. Please try again in a moment.");
-                }
-            });
-        }
-        
-        // Preload the schema
-        loadJsonSchema().then(success => {
-            if (success) {
-                console.log("Schema preloaded successfully");
-            } else {
-                console.error("Failed to preload schema");
             }
         });
         

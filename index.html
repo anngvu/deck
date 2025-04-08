@@ -6,32 +6,12 @@
     <title>Dataset Deck (Loadable)</title>
     <link rel="stylesheet" href="style.css">
     
-    <!-- Import Map for JSON Schema Form component -->
-    <script type="importmap">
-        {
-            "imports": {
-                "lit": "https://ga.jspm.io/npm:lit@2.8.0/index.js",
-                "lit/": "https://ga.jspm.io/npm:lit@2.8.0/",
-                "lit-html": "https://ga.jspm.io/npm:lit-html@2.8.0/lit-html.js",
-                "lit-html/": "https://ga.jspm.io/npm:lit-html@2.8.0/",
-                "lit-element/": "https://ga.jspm.io/npm:lit-element@3.3.3/",
-                "@lit/reactive-element": "https://ga.jspm.io/npm:@lit/reactive-element@1.6.3/reactive-element.js",
-                "@lit/reactive-element/": "https://ga.jspm.io/npm:@lit/reactive-element@1.6.1/",
-                
-                "@shoelace-style/shoelace/": "https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.3.0/",
-                
-                "lodash-es/set": "https://unpkg.com/lodash-es@4.17.21/set.js",
-                
-                "@jsfe/core": "https://unpkg.com/@jsfe/core@0.0.4/dist/esm-min"
-            }
-        }
-    </script>
-    
-    <!-- Shoelace Styles -->
-    <link
-        rel="stylesheet"
-        href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.9.0/cdn/themes/dark.css"
-    />
+    <!-- Include form deps -->
+    <link rel="stylesheet" href="form-generator.css">
+    <script src="form-generator.js"></script>
+
+    <!-- Include Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css">
 </head>
 <body>
 
@@ -99,18 +79,22 @@
             </form>
         </div>
 
-        <!-- New Card Editing Area (Initially Hidden) -->
         <div id="edit-card-area" class="hidden">
-            <h2>Edit Card Data</h2>
-            <div id="edit-form-container">
-                <!-- JSON Schema Form will be initialized here -->
-                <json-schema-form id="json-schema-form"></json-schema-form>
-            </div>
-            <div class="form-actions">
-                <button id="back-to-comparison" class="secondary-button">Cancel</button>
-                <button id="save-card-changes" class="primary-button">Save Changes</button>
+            <div class="modal-overlay">
+                <div class="modal-content">
+                    <h2>Edit Card Data</h2>
+                    <div id="edit-form-container">
+                        <!-- Vanilla Form will render here -->
+                        <div id="vanilla-form-container"></div>
+                    </div>
+                    <div class="form-actions">
+                        <button id="back-to-comparison" class="secondary-button">Cancel</button>
+                        <button id="save-card-changes" class="primary-button">Save Changes</button>
+                    </div>
+                </div>
             </div>
         </div>
+        
 
         <div id="controls-area" class="hidden"> <!-- Also initially hidden -->
             <button id="reset-button">Reset Progress</button>
@@ -123,11 +107,6 @@
         </div>
 
     </div><!-- End #main-app-area -->
-
-    <!-- Import the JSON Schema Form component -->
-    <script type="module">
-        import '@jsfe/core';
-    </script>
     
     <script src="app.js"></script>
 </body>
