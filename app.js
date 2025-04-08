@@ -1,3 +1,5 @@
+// Add these imports at the top of app.js
+// We'll start by adding the new configuration for the schema URL
 document.addEventListener('DOMContentLoaded', () => {
 
     // --- Configuration ---
@@ -8,6 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const STORAGE_KEY_USERNAME = 'deck_username';
     // Default URL for convenience during testing
     const DEFAULT_DATA_URL = "https://raw.githubusercontent.com/nf-osi/jobs/refs/heads/dataset_curation/dataset_curation/test/results.json"; // e.g., "https://gist.githubusercontent.com/..."
+    // Schema URL for the form
+    const SCHEMA_URL = "https://raw.githubusercontent.com/nf-osi/nf-metadata-dictionary/refs/heads/main/registered-json-schemas/PortalDataset.json";
 
     // --- Global State Variables ---
     let cardSets = []; // Will hold data loaded from JSON -> [cardsA, cardsB, cardsC]
@@ -16,6 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let isSubmitting = false; // Flag to prevent multiple submissions
     let apiKey = ""; 
     let username = ""; // Store the username
+    let jsonSchema = null; // Will hold the loaded schema
+    let selectedCardForEditing = null; // Will hold the card being edited
+    let originalCardData = null; // Will hold the original card data for comparison
+    let changedFields = []; // Will track which fields have been changed
 
     // --- DOM Element References ---
     // Load Area
@@ -44,6 +52,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalResultsCountEl = document.getElementById('total-results-count');
     const controlsAreaEl = document.getElementById('controls-area');
     const resetButton = document.getElementById('reset-button');
+    // New elements for card editing
+    const editCardAreaEl = document.getElementById('edit-card-area');
+    const editCardFormEl = document.getElementById('edit-card-form');
+    const backToComparisonBtn = document.getElementById('back-to-comparison');
+    const saveCardChangesBtn = document.getElementById('save-card-changes');
 
     // --- State Management (localStorage) ---
     let currentState = {
@@ -293,8 +306,114 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- New Card Editing Functions ---
+    
+    // Function to load the JSON schema for the form
+    async function loadJsonSchema() {
+        try {
+            const response = await fetch(SCHEMA_URL);
+            if (!response.ok) {
+                throw new Error(`Failed to load schema: ${response.status} ${response.statusText}`);
+            }
+            
+            jsonSchema = await response.json();
+            console.log('Schema loaded successfully:', jsonSchema);
+            return true;
+        } catch (error) {
+            console.error('Error loading schema:', error);
+            return false;
+        }
+    }
+
+    // Function to detect which fields were changed during editing
+    function detectChanges(original, edited) {
+        const changes = [];
+        
+        for (const key in edited) {
+            // Check if the property exists in both objects and has changed
+            if (edited.hasOwnProperty(key) && key !== 'id') {
+                if (JSON.stringify(original[key]) !== JSON.stringify(edited[key])) {
+                    changes.push(key);
+                }
+            }
+        }
+        
+        return changes;
+    }
+
+    // Function to open the edit form for a card
+    function openEditForm(cardData) {
+        console.log("Opening edit form for card:", cardData);
+        
+        if (!jsonSchema) {
+            console.error("Schema not loaded. Cannot edit card.");
+            alert("Schema not loaded. Cannot edit card.");
+            return;
+        }
+        
+        // Save the original card data for comparison later
+        selectedCardForEditing = cardData;
+        originalCardData = JSON.parse(JSON.stringify(cardData)); // Deep copy
+        
+        // Hide comparison area and show edit area
+        comparisonAreaEl.classList.add('hidden');
+        editCardAreaEl.classList.remove('hidden');
+        
+        // Update the form with the card data
+        const jsonSchemaForm = document.getElementById('json-schema-form');
+        
+        // Ensure the schema is properly set
+        if (jsonSchemaForm) {
+            console.log("Setting schema and data for form");
+            
+            // Set schema first, then data
+            setTimeout(() => {
+                jsonSchemaForm.schema = jsonSchema;
+                
+                // Set data after a small delay to ensure schema is loaded
+                setTimeout(() => {
+                    jsonSchemaForm.data = cardData;
+                    
+                    // Set up event handlers for the form
+                    jsonSchemaForm.onDataChange = (newData) => {
+                        console.info('Data changed:', newData);
+                        // We'll track changes when saving
+                    };
+                    
+                    jsonSchemaForm.onFormSubmit = (newData, valid) => {
+                        console.info('Form submitted:', { newData, valid });
+                        if (valid) {
+                            saveCardChanges(newData);
+                        }
+                    };
+                }, 100);
+            }, 100);
+        } else {
+            console.error("JSON Schema Form element not found");
+        }
+    }
+
+    // Function to save changes made to the card
+    function saveCardChanges(newData) {
+        // Detect which fields were changed
+        changedFields = detectChanges(originalCardData, newData);
+        
+        // Log the changes
+        console.log('Changed fields:', changedFields);
+        
+        // Update the card data
+        Object.assign(selectedCardForEditing, newData);
+        
+        // Return to comparison view
+        editCardAreaEl.classList.add('hidden');
+        comparisonAreaEl.classList.remove('hidden');
+        
+        // Update the card display
+        displayComparison(currentState.currentIndex);
+    }
+
     // --- Rendering Functions ---
-    function renderCard(cardData) {
+    function renderCard(cardData, displayIndex) {
         const cardEl = document.createElement('div');
         cardEl.className = 'card';
         const minimal = isMinimalCard(cardData);
@@ -302,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let attributesHtml = '<p><i>This failed validation.</i></p>';
 
         if (!minimal) {
-            title = `<a href="https://www.synapse.org/Synapse:${cardData.id}">${cardData.title}</a>`; 
+            title = `<a href="https://www.synapse.org/Synapse:${cardData.id}">${cardData.title || 'Dataset'}</a>`; 
             attributesHtml = ''; // Reset for non-minimal cards
             // Build attributes list only if not minimal
             for (const key in cardData) {
@@ -316,6 +435,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const imgHtml = cardData.img ? `<img src="/img/${cardData.img}" alt="${cardData.name || 'Card Image'}">` : '';
+        
+        // Add edit button for non-minimal cards
+        const editButtonHtml = !minimal ? 
+            `<button class="edit-card-button" data-display-index="${displayIndex}">Edit</button>` : '';
 
         cardEl.innerHTML = `
             <h3>${title}</h3>
@@ -323,7 +446,24 @@ document.addEventListener('DOMContentLoaded', () => {
             <dl>
                 ${attributesHtml}
             </dl>
+            ${editButtonHtml}
         `;
+        
+        // Add click event for the edit button
+        if (!minimal) {
+            const editButton = cardEl.querySelector('.edit-card-button');
+            if (editButton) {
+                editButton.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    console.log("Edit button clicked for index:", displayIndex);
+                    // Clone the card data to prevent unintended mutations
+                    const cardToEdit = JSON.parse(JSON.stringify(currentDisplayOrder[displayIndex].card));
+                    openEditForm(cardToEdit);
+                });
+            }
+        }
+        
         return cardEl;
     }
 
@@ -359,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentDisplayOrder = shuffleArray(cardsForComparison);
 
             currentDisplayOrder.forEach((item, displayIndex) => {
-                const cardElement = renderCard(item.card);
+                const cardElement = renderCard(item.card, displayIndex);
                 if (cardElement) {
                     cardContainerEl.appendChild(cardElement);
                 } else {
@@ -374,6 +514,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
+            // Reset changedFields when displaying a new comparison
+            changedFields = [];
+            
+            // Hide edit area and show comparison area
+            editCardAreaEl.classList.add('hidden');
             comparisonAreaEl.classList.remove('hidden');
             completionAreaEl.classList.add('hidden');
             navigationAreaEl.classList.remove('hidden');
@@ -390,6 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function displayCompletion() {
         statusMessageEl.textContent = "All comparisons complete!";
         comparisonAreaEl.classList.add('hidden');
+        editCardAreaEl.classList.add('hidden');
         completionAreaEl.classList.remove('hidden');
         navigationAreaEl.classList.remove('hidden');
         updateResultsCount(); // Update results count
@@ -444,7 +590,8 @@ document.addEventListener('DOMContentLoaded', () => {
             scoreB: scores[1],              // Score given to original card B
             scoreC: scores[2],              // Score given to original card C
             notes: notesText,               // Notes from the textarea
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            changed: changedFields.length > 0 ? changedFields : undefined // Add changed fields if any
         };
         
         // Disable form during submission
@@ -483,6 +630,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     submitStatusEl.textContent = "Scores submitted, but no valid highest card found.";
                     submitStatusEl.style.color = 'orange';
                 }
+                
+                // Reset changedFields for the next comparison
+                changedFields = [];
                 
                 // Advance to next comparison
                 currentState.currentIndex++;
@@ -538,6 +688,12 @@ document.addEventListener('DOMContentLoaded', () => {
         displayComparison(currentState.currentIndex);
     }
     
+    // --- Event handlers for card editing ---
+    function handleBackToComparison() {
+        // Discard changes and return to comparison view
+        editCardAreaEl.classList.add('hidden');
+        comparisonAreaEl.classList.remove('hidden');
+    }
 
     // --- Data Loading ---
     async function loadDataFromUrl(url) {
@@ -566,11 +722,20 @@ document.addEventListener('DOMContentLoaded', () => {
         apiKey = enteredApiKey;
         username = validation.username;
 
-        loadStatusMessageEl.textContent = `Welcome, ${username}. Loading data...`;
+        loadStatusMessageEl.textContent = `Welcome, ${username}. Loading schema...`;
         loadStatusMessageEl.style.color = 'blue';
-        dataIsValid = false; // Assume invalid until successfully loaded
-
+        
+        // Load the JSON schema for the form first
         try {
+            const schemaLoaded = await loadJsonSchema();
+            
+            if (!schemaLoaded) {
+                throw new Error("Failed to load schema. Please try again.");
+            }
+            
+            loadStatusMessageEl.textContent = `Schema loaded. Loading dataset data...`;
+            dataIsValid = false; // Assume invalid until successfully loaded
+
             // Basic URL format check (optional but helpful)
             new URL(url);
             const response = await fetch(url);
@@ -651,6 +816,21 @@ document.addEventListener('DOMContentLoaded', () => {
             resetButton.addEventListener('click', resetState);
             gotoButton.addEventListener('click', handleGotoIndex);
             scoringFormEl.dataset.listenerAttached = 'true'; // Mark as attached
+            
+            // Add event listeners for card editing
+            if (backToComparisonBtn) {
+                backToComparisonBtn.addEventListener('click', handleBackToComparison);
+            }
+            if (saveCardChangesBtn) {
+                saveCardChangesBtn.addEventListener('click', () => {
+                    const jsonSchemaForm = document.getElementById('json-schema-form');
+                    if (jsonSchemaForm.checkValidity()) {
+                        saveCardChanges(jsonSchemaForm.data);
+                    } else {
+                        jsonSchemaForm.reportValidity();
+                    }
+                });
+            }
         }
 
         console.log("initializeAppLogic: Calling displayComparison for index", currentState.currentIndex);
@@ -676,6 +856,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadStatusMessageEl.style.color = 'orange';
             }
         });
+        
+        // Set up event listeners for the edit card area buttons
+        if (backToComparisonBtn) {
+            backToComparisonBtn.addEventListener('click', handleBackToComparison);
+        }
+        
+        if (saveCardChangesBtn) {
+            saveCardChangesBtn.addEventListener('click', () => {
+                const jsonSchemaForm = document.getElementById('json-schema-form');
+                if (jsonSchemaForm && jsonSchemaForm.checkValidity) {
+                    if (jsonSchemaForm.checkValidity()) {
+                        saveCardChanges(jsonSchemaForm.data);
+                    } else {
+                        jsonSchemaForm.reportValidity();
+                    }
+                } else {
+                    console.error("JSON Schema Form not fully initialized");
+                    alert("Form not ready. Please try again in a moment.");
+                }
+            });
+        }
+        
+        // Preload the schema
+        loadJsonSchema().then(success => {
+            if (success) {
+                console.log("Schema preloaded successfully");
+            } else {
+                console.error("Failed to preload schema");
+            }
+        });
+        
         // Note: We DO NOT call initializeAppLogic() here.
         // It's only called after successful data load.
     }
