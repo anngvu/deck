@@ -180,19 +180,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         return Object.entries(cardData).reduce((accumulator, [key, originalValue]) => {
-            // Skip if the value is an object, null (unsupported as annotation value)
-            if (key === 'id' || typeof originalValue === 'object' && originalValue !== null && !Array.isArray(originalValue)) {
-                console.warn(`Skipping annotation key "${key}": value is an unsupported object.`);
+            // Skip if the value is an object, null, empty array, or empty string
+            if (key === 'id' || 
+                originalValue == null || 
+                (typeof originalValue === 'object' && originalValue !== null && !Array.isArray(originalValue)) ||
+                (Array.isArray(originalValue) && originalValue.length === 0) ||
+                (typeof originalValue === 'string' && originalValue.trim() === '')) {
+                console.warn(`Skipping annotation key "${key}"`);
                 return accumulator; // Don't add this key to the result
             }
         
             const type = getAnnotationValueType(originalValue);
             let valueArray;
         
-            if (originalValue == null) { // Handle null and undefined
-            // Represent "no value" with empty array, type is STRING (as per getAnnotationValueType)
-            valueArray = [];
-            } else if (Array.isArray(originalValue)) {
+            if (Array.isArray(originalValue)) {
             // Convert each element to string, handles empty arrays correctly (value=[])
             valueArray = originalValue.map(item => String(item));
             } else {
@@ -322,24 +323,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Function to detect which fields were changed during editing
-    function detectChanges(original, edited) {
-        const changes = [];
-        
-        for (const key in edited) {
-            // Check if the property exists in both objects and has changed
-            if (edited.hasOwnProperty(key) && key !== 'id') {
-                if (JSON.stringify(original[key]) !== JSON.stringify(edited[key])) {
-                    changes.push(key);
-                }
-            }
-        }
-        
-        return changes;
-    }
-
     // Function to open the edit form for a card
-    function openEditForm(cardData) {
+    function openEditForm(cardData, displayIndex) {
         console.log("Opening edit form for card:", cardData);
         
         if (!jsonSchema) {
@@ -348,18 +333,47 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
+        // Ensure we have an ID
+        if (!cardData || !cardData.id) {
+            console.error("Card is missing ID, cannot edit");
+            alert("Error: Card is missing ID");
+            return;
+        }
+        
+        // Get the original set index (0, 1, or 2 for Set A, B, or C)
+        // This is crucial since IDs are only unique within a set
+        const originalSetIndex = currentDisplayOrder[displayIndex].originalIndex;
+        
+        // Save the original, unmodified card data for comparison later
+        // Make a deep copy to ensure we don't have reference issues
+        originalCardData = JSON.parse(JSON.stringify(cardData));
+        
+        // Store the set index as a property on the original data
+        // This ensures we know which set this card belongs to
+        originalCardData._setIndex = originalSetIndex;
+        
+        console.log(`Editing card with ID: ${originalCardData.id} from Set ${["A", "B", "C"][originalSetIndex]} (index: ${originalSetIndex})`);
+        
         // Prepare the card data by filling in missing required fields with null values
         const preparedCardData = fillMissingRequiredFields(cardData, jsonSchema);
         
-        // Save the original card data for comparison later
-        selectedCardForEditing = preparedCardData;
-        originalCardData = JSON.parse(JSON.stringify(preparedCardData)); // Deep copy
+        // Store the set index on the prepared data too
+        preparedCardData._setIndex = originalSetIndex;
+        
+        // Save the prepared card data (with a deep copy)
+        selectedCardForEditing = JSON.parse(JSON.stringify(preparedCardData));
+        
+        // Store auto-filled fields info separately and then remove from the object
+        window.autoFilledFields = preparedCardData._autoFilledFields || [];
+        delete preparedCardData._autoFilledFields;
+        
+        console.log("Auto-filled fields:", window.autoFilledFields);
         
         // Hide comparison area and show edit area
         comparisonAreaEl.classList.add('hidden');
         editCardAreaEl.classList.remove('hidden');
         
-        // Generate the form with vanilla form generator
+        // Generate the form with our vanilla form generator
         try {
             // Check if the form generator functions are available
             if (typeof generateFormFromSchema !== 'function') {
@@ -367,7 +381,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
-            console.log("Generating form from schema for:", preparedCardData);
+            console.log(`Generating form from schema for card ID: ${preparedCardData.id} (Set ${["A", "B", "C"][originalSetIndex]})`);
             
             // Generate the form
             const form = generateFormFromSchema(jsonSchema, preparedCardData, 'vanilla-form-container');
@@ -381,10 +395,158 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Helper function to fill in missing required fields with null values
+    // Function to save changes made to the card
+    function saveCardChanges() {
+        if (!window.currentForm) {
+            console.error("Form not found");
+            return;
+        }
+        
+        // Extract data from the form
+        const formData = extractFormData(window.currentForm);
+        if (!formData) {
+            console.error("Could not extract form data");
+            return;
+        }
+        
+        console.log('Original data:', originalCardData);
+        console.log('Form data after editing:', formData);
+        
+        // Ensure the ID is preserved from the original card
+        if (originalCardData && originalCardData.id) {
+            formData.id = originalCardData.id;
+        }
+        
+        // Get the set index from the original data
+        const setIndex = originalCardData._setIndex;
+        if (setIndex === undefined) {
+            console.error("Missing set index, cannot update card correctly");
+            alert("Error: Cannot identify which set this card belongs to");
+            return;
+        }
+        
+        // Detect which fields were actually changed by user (ignoring auto-filled nulls)
+        changedFields = detectActualChanges(originalCardData, formData);
+        
+        // Log the changes
+        console.log(`Changed fields for card ID ${formData.id} in Set ${["A", "B", "C"][setIndex]}:`, changedFields);
+        
+        // IMPORTANT: First update the original card in its set
+        // This is the authoritative data source
+        let updatedInSet = false;
+        const targetId = formData.id;
+        
+        // Navigate to the specific set and find the card by ID within that set
+        if (cardSets[setIndex]) {
+            for (let cardIndex = 0; cardIndex < cardSets[setIndex].length; cardIndex++) {
+                if (cardSets[setIndex][cardIndex].id === targetId) {
+                    console.log(`Found card in Set ${["A", "B", "C"][setIndex]} at index ${cardIndex}`);
+                    
+                    // Create a clean copy of the form data (without our internal properties)
+                    const cleanData = { ...formData };
+                    delete cleanData._setIndex; // Remove our tracking property
+                    
+                    // Update the card with the clean data
+                    cardSets[setIndex][cardIndex] = cleanData;
+                    
+                    updatedInSet = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!updatedInSet) {
+            console.error(`Could not find card with ID ${targetId} in Set ${["A", "B", "C"][setIndex]}`);
+            alert("Error: Card could not be found in its original set");
+            return;
+        }
+        
+        // Now update the card in the current display order if it's visible
+        let updatedInDisplay = false;
+        
+        for (let i = 0; i < currentDisplayOrder.length; i++) {
+            // We need to match BOTH the ID and the original set index
+            if (currentDisplayOrder[i].card.id === targetId && 
+                currentDisplayOrder[i].originalIndex === setIndex) {
+                
+                console.log(`Found card in display order at index ${i}`);
+                
+                // Create a clean copy of the form data
+                const cleanData = { ...formData };
+                delete cleanData._setIndex; // Remove our tracking property
+                
+                // Update the card with the clean data
+                currentDisplayOrder[i].card = cleanData;
+                
+                updatedInDisplay = true;
+                break;
+            }
+        }
+        
+        if (!updatedInDisplay) {
+            console.warn(`Could not find card with ID ${targetId} from Set ${["A", "B", "C"][setIndex]} in current display order`);
+            // Not critical - the card might not be visible in the current comparison
+        }
+        
+        // Cleanup
+        window.currentForm = null;
+        window.autoFilledFields = null;
+        
+        // Return to comparison view
+        editCardAreaEl.classList.add('hidden');
+        comparisonAreaEl.classList.remove('hidden');
+        
+        // Update the card display with current state
+        displayComparison(currentState.currentIndex);
+        
+        console.log('Card update complete');
+    }
+    
+    // Detect actually changed fields, ignoring auto-filled nulls
+    function detectActualChanges(original, edited) {
+        const changes = [];
+        const wasAutoFilled = {}; // Track which fields were auto-filled
+        
+        // First, identify fields that were auto-filled with nulls
+        for (const key in edited) {
+            if (!(key in original)) {
+                // This field was probably auto-filled
+                wasAutoFilled[key] = true;
+            }
+        }
+        
+        // Now detect actual changes, ignoring auto-filled fields unless they have real values
+        for (const key in edited) {
+            if (edited.hasOwnProperty(key) && key !== 'id') {
+                const editedValue = edited[key];
+                const originalValue = original[key];
+                
+                // Skip null/empty auto-filled fields
+                if (wasAutoFilled[key] && 
+                    (editedValue === null || editedValue === '' || 
+                        (Array.isArray(editedValue) && editedValue.length === 0) ||
+                        (typeof editedValue === 'object' && editedValue !== null && Object.keys(editedValue).length === 0))) {
+                    continue;
+                }
+                
+                // Check if the field actually changed
+                if (JSON.stringify(originalValue) !== JSON.stringify(editedValue)) {
+                    changes.push(key);
+                }
+            }
+        }
+        
+        return changes;
+    }
+
     function fillMissingRequiredFields(data, schema) {
         // Create a deep copy of the data to avoid modifying the original
         const filledData = JSON.parse(JSON.stringify(data));
+        
+        // Initialize or get the _autoFilledFields tracking object
+        if (!filledData._autoFilledFields) {
+            filledData._autoFilledFields = [];
+        }
         
         // If the schema has required fields, ensure they exist in the data
         if (schema && schema.required && Array.isArray(schema.required)) {
@@ -408,11 +570,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         } else {
                             filledData[fieldName] = null;
                         }
+                        
+                        // Track that this field was auto-filled
+                        filledData._autoFilledFields.push(fieldName);
+                        
+                        console.log(`Initialized missing required field: ${fieldName}`);
                     } else {
                         // Default to null if type information is not available
                         filledData[fieldName] = null;
+                        filledData._autoFilledFields.push(fieldName);
                     }
-                    console.log(`Initialized missing required field: ${fieldName}`);
                 }
             });
         }
@@ -427,18 +594,46 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Make sure the property exists in data as an object
                     if (!filledData[propName] || typeof filledData[propName] !== 'object') {
                         filledData[propName] = {};
+                        filledData._autoFilledFields.push(propName);
                     }
                     
                     // Recursively fill missing fields in the nested object
-                    filledData[propName] = fillMissingRequiredFields(filledData[propName], prop);
+                    const nestedResult = fillMissingRequiredFields(filledData[propName], prop);
+                    filledData[propName] = nestedResult;
+                    
+                    // Add nested auto-filled fields with proper path
+                    if (nestedResult._autoFilledFields && nestedResult._autoFilledFields.length > 0) {
+                        nestedResult._autoFilledFields.forEach(nestedField => {
+                            filledData._autoFilledFields.push(`${propName}.${nestedField}`);
+                        });
+                    }
+                    
+                    // Remove the tracking property from the nested object
+                    if (filledData[propName]._autoFilledFields) {
+                        delete filledData[propName]._autoFilledFields;
+                    }
                 }
                 
                 // If property is an array of objects, process each item
                 if (prop.type === 'array' && prop.items && prop.items.type === 'object') {
                     if (Array.isArray(filledData[propName])) {
-                        filledData[propName] = filledData[propName].map(item => 
-                            fillMissingRequiredFields(item, prop.items)
-                        );
+                        filledData[propName] = filledData[propName].map((item, index) => {
+                            const arrayItemResult = fillMissingRequiredFields(item, prop.items);
+                            
+                            // Add array item auto-filled fields with proper path
+                            if (arrayItemResult._autoFilledFields && arrayItemResult._autoFilledFields.length > 0) {
+                                arrayItemResult._autoFilledFields.forEach(arrayField => {
+                                    filledData._autoFilledFields.push(`${propName}[${index}].${arrayField}`);
+                                });
+                            }
+                            
+                            // Remove the tracking property from the array item
+                            if (arrayItemResult._autoFilledFields) {
+                                delete arrayItemResult._autoFilledFields;
+                            }
+                            
+                            return arrayItemResult;
+                        });
                     }
                 }
             });
@@ -447,41 +642,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return filledData;
     }
     
-    // Function to save changes made to the card
-    function saveCardChanges() {
-        if (!window.currentForm) {
-            console.error("Form not found");
-            return;
-        }
-        
-        // Extract data from the form
-        const formData = extractFormData(window.currentForm);
-        if (!formData) {
-            console.error("Could not extract form data");
-            return;
-        }
-        
-        // Detect which fields were changed
-        changedFields = detectChanges(originalCardData, formData);
-        
-        // Log the changes
-        console.log('Changed fields:', changedFields);
-        
-        // Update the card data
-        Object.assign(selectedCardForEditing, formData);
-        
-        // Cleanup
-        window.currentForm = null;
-        
-        // Return to comparison view
-        editCardAreaEl.classList.add('hidden');
-        comparisonAreaEl.classList.remove('hidden');
-        
-        // Update the card display
-        displayComparison(currentState.currentIndex);
-    }
     
     // --- Rendering Functions ---
+    // Updated renderCard function to skip null values
     function renderCard(cardData, displayIndex) {
         const cardEl = document.createElement('div');
         cardEl.className = 'card';
@@ -492,13 +655,53 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!minimal) {
             title = `<a href="https://www.synapse.org/Synapse:${cardData.id}">${cardData.title || 'Dataset'}</a>`; 
             attributesHtml = ''; // Reset for non-minimal cards
-            // Build attributes list only if not minimal
-            for (const key in cardData) {
-                if (cardData.hasOwnProperty(key) && key !== 'id' && key !== 'title' && key !== 'img') {
-                    attributesHtml += `<dt>${capitalize(key)}</dt><dd>${cardData[key]}</dd>`;
+            
+            // Get property order from schema
+            const schemaPropertyOrder = getSchemaPropertyOrder();
+            
+            // First display properties in the schema-defined order
+            if (schemaPropertyOrder.length > 0) {
+                schemaPropertyOrder.forEach(key => {
+                    if (cardData.hasOwnProperty(key) && 
+                        key !== 'id' && 
+                        key !== 'img' && 
+                        key !== 'title' && 
+                        !isEmptyValue(cardData[key])) { // Skip empty/null values
+                        
+                        const value = formatValue(cardData[key]);
+                        attributesHtml += `<dt>${capitalize(key)}</dt><dd>${value}</dd>`;
+                    }
+                });
+                
+                // Then display any additional properties not in the schema
+                for (const key in cardData) {
+                    if (cardData.hasOwnProperty(key) && 
+                        key !== 'id' && 
+                        key !== 'title' && 
+                        key !== 'img' && 
+                        !schemaPropertyOrder.includes(key) && 
+                        !isEmptyValue(cardData[key])) { // Skip empty/null values
+                        
+                        const value = formatValue(cardData[key]);
+                        attributesHtml += `<dt>${capitalize(key)}</dt><dd>${value}</dd>`;
+                    }
+                }
+            } else {
+                // Fallback if schema properties are not available
+                for (const key in cardData) {
+                    if (cardData.hasOwnProperty(key) && 
+                        key !== 'id' && 
+                        key !== 'title' && 
+                        key !== 'img' && 
+                        !isEmptyValue(cardData[key])) { // Skip empty/null values
+                        
+                        const value = formatValue(cardData[key]);
+                        attributesHtml += `<dt>${capitalize(key)}</dt><dd>${value}</dd>`;
+                    }
                 }
             }
-            if (!attributesHtml) { // Handle case where name exists but no other attributes
+            
+            if (!attributesHtml) { // Handle case where there are no attributes
                 attributesHtml = '<p><i>No additional attributes.</i></p>';
             }
         }
@@ -525,15 +728,124 @@ document.addEventListener('DOMContentLoaded', () => {
                 editButton.addEventListener('click', function(event) {
                     event.preventDefault();
                     event.stopPropagation();
-                    console.log("Edit button clicked for index:", displayIndex);
+                    
+                    // Log which card we're editing including its set
+                    const setIndex = currentDisplayOrder[displayIndex].originalIndex;
+                    console.log(`Edit button clicked for display index: ${displayIndex} (Set ${["A", "B", "C"][setIndex]})`);
+                    console.log("Editing card:", currentDisplayOrder[displayIndex].card);
+                    
                     // Clone the card data to prevent unintended mutations
                     const cardToEdit = JSON.parse(JSON.stringify(currentDisplayOrder[displayIndex].card));
-                    openEditForm(cardToEdit);
+                    
+                    // Ensure the card has an ID
+                    if (!cardToEdit.id) {
+                        console.error("Card is missing ID");
+                        alert("Error: Card is missing ID");
+                        return;
+                    }
+                    
+                    // Pass both the card data and display index to openEditForm
+                    openEditForm(cardToEdit, displayIndex);
                 });
             }
         }
         
         return cardEl;
+    }
+
+    // Helper function to check if a value is empty (null, undefined, empty string, empty array, or empty object)
+    function isEmptyValue(value) {
+        // Check for null or undefined
+        if (value === null || value === undefined) {
+            return true;
+        }
+        
+        // Check for empty string
+        if (typeof value === 'string' && value.trim() === '') {
+            return true;
+        }
+        
+        // Check for empty array
+        if (Array.isArray(value) && value.length === 0) {
+            return true;
+        }
+        
+        // Check for empty object (no own enumerable properties)
+        if (typeof value === 'object' && Object.keys(value).length === 0) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    // Helper function to format different value types (not showing empty values)
+    function formatValue(value) {
+        if (isEmptyValue(value)) {
+            return '';
+        }
+        
+        if (Array.isArray(value)) {
+            // Handle arrays of objects specially
+            if (typeof value[0] === 'object' && value[0] !== null) {
+                try {
+                    return value
+                        .filter(item => !isEmptyValue(item)) // Skip empty items
+                        .map(item => {
+                            if (typeof item === 'object') {
+                                // Create a simplified string representation
+                                return Object.entries(item)
+                                    .filter(([k, v]) => !isEmptyValue(v)) // Skip empty values
+                                    .map(([k, v]) => `${k}: ${v}`)
+                                    .join(', ');
+                            }
+                            return String(item);
+                        })
+                        .join('; ');
+                } catch (e) {
+                    return JSON.stringify(value);
+                }
+            }
+            
+            return value
+                .filter(item => !isEmptyValue(item)) // Skip empty items
+                .join(', ');
+        }
+        
+        if (typeof value === 'object' && value !== null) {
+            try {
+                // Create a simplified string representation
+                const entries = Object.entries(value)
+                    .filter(([k, v]) => !isEmptyValue(v)); // Skip empty values
+                    
+                if (entries.length === 0) {
+                    return '';
+                }
+                
+                return entries
+                    .map(([k, v]) => `${k}: ${v}`)
+                    .join(', ');
+            } catch (e) {
+                return JSON.stringify(value);
+            }
+        }
+        
+        return String(value);
+    }
+
+    // Helper function to get property order from the schema
+    function getSchemaPropertyOrder() {
+        if (!jsonSchema || !jsonSchema.properties) {
+            return [];
+        }
+        
+        // Get property order from schema
+        // First check if there's an explicit order
+        if (jsonSchema.propertyOrder) {
+            return jsonSchema.propertyOrder;
+        }
+        
+        // Otherwise, use the order properties are defined in the schema
+        return Object.keys(jsonSchema.properties);
     }
 
     function displayComparison(index) {
@@ -760,6 +1072,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event handlers for card editing ---
     function handleBackToComparison() {
         // Discard changes and return to comparison view
+        window.currentForm = null;
+        window.autoFilledFields = null;
+
         editCardAreaEl.classList.add('hidden');
         comparisonAreaEl.classList.remove('hidden');
     }
