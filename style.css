@@ -30,7 +30,29 @@ h1, h2 {
     font-weight: bold;
 }
 
-.load-controls input[type="url"] {
+.schema-info {
+    font-size: 0.9em;
+    margin: 10px 0;
+    color: #555;
+    max-width: 700px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.schema-info code {
+    display: block;
+    margin-top: 5px;
+    padding: 5px;
+    background-color: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-family: monospace;
+    word-break: break-all;
+    font-size: 0.9em;
+}
+
+.load-controls input[type="url"],
+.load-controls input[type="password"] {
     padding: 8px 10px;
     border: 1px solid #ccc;
     border-radius: 4px;
@@ -47,24 +69,20 @@ h1, h2 {
      cursor: pointer;
      transition: background-color 0.2s ease;
 }
+
 .load-controls button:hover {
      background-color: #218838;
 }
+
 .load-controls button:disabled {
     background-color: #aaa;
     cursor: not-allowed;
 }
 
-
 #load-status-message {
     margin-top: 15px;
     font-style: italic;
     min-height: 1.2em; /* Reserve space */
-}
-
-/* Ensure hidden class works */
-.hidden {
-    display: none;
 }
 
 #status-area {
@@ -84,6 +102,7 @@ h1, h2 {
     margin-bottom: 30px;
     margin-left: 20px;
 }
+
 
 #card-container {
     display: flex;
@@ -148,6 +167,31 @@ h1, h2 {
     margin: 10px auto 15px auto; /* Center image */
     display: block;
     border-radius: 4px;
+}
+
+/* Edit button in cards */
+.edit-card-button {
+    margin-top: 10px;
+    padding: 5px 10px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, opacity 0.2s ease;
+    font-size: 0.9em;
+    align-self: center;
+    /* Hide by default */
+    opacity: 0;
+}
+
+.card:hover .edit-card-button {
+    /* Show when hovering over the card */
+    opacity: 1;
+}
+
+.edit-card-button:hover {
+    background-color: #0056b3;
 }
 
 /* Scoring Form */
@@ -216,20 +260,20 @@ input[type=number]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-input[type=number] {
-  -moz-appearance: textfield; /* Firefox */
-}
 
 
 .form-actions {
     text-align: center;
-    margin-top: 10px;
+    margin-top: 20px;
+    margin-bottom: 10px;
 }
 
-.form-actions button, #controls-area button {
+.form-actions button, 
+#controls-area button,
+.primary-button,
+.secondary-button {
     padding: 10px 25px;
     font-size: 1.1em;
-    background-color: #007bff;
     color: white;
     border: none;
     border-radius: 5px;
@@ -238,10 +282,25 @@ input[type=number] {
     margin: 5px;
 }
 
-.form-actions button:hover, #controls-area button:hover {
+.form-actions button,
+.primary-button {
+    background-color: #007bff;
+}
+
+.form-actions button:hover,
+.primary-button:hover {
     background-color: #0056b3;
 }
 
+.secondary-button {
+    background-color: #6c757d;
+}
+
+.secondary-button:hover {
+    background-color: #5a6268;
+}
+
+.form-actions button:disabled, 
 #controls-area button:disabled {
     background-color: #aaa;
     cursor: not-allowed;
@@ -255,10 +314,34 @@ input[type=number] {
     background-color: #c82333;
 }
 
+/* Card Editing Area */
+#edit-card-area {
+    margin: 20px auto;
+    padding: 20px;
+    max-width: 800px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+#edit-form-container {
+    margin: 20px 0;
+}
+
+/* Ensure edit area fits properly on mobile devices */
+@media (max-width: 768px) {
+    #edit-card-area {
+        margin: 10px;
+        padding: 15px;
+        max-width: 100%;
+    }
+}
+
 /* Utility */
 .hidden {
     display: none;
 }
+
 .error-message {
     color: #dc3545;
     font-weight: bold;
