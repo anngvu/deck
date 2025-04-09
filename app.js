@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
 
     // --- Configuration ---
-    const POST_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbz_a4HaXLZJ4yeKzVC16cpb9nn8ofbvBjgB_OSmWSXaR3fHntem5sMn5vGjtCZ_p7s/exec';
+    const POST_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbzB3oz8Ehy3fKOqKGoFsa5AZfkfu-OauD5_0OsFzIL_l2hOdP1Uhox5DsPdeBvDq7Xd/exec';
     const SYNAPSE_USER_PROFILE_URL = 'https://repo-prod.prod.sagebase.org/repo/v1/userProfile';
     const STORAGE_KEY_INDEX = 'deck_currentIndex';
     const STORAGE_KEY_RESULTS = 'deck_results';
