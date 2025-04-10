@@ -269,7 +269,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function submitCardData(cardData, apiKey) {
-        id = cardData.id;
+
+        const submissionData = { ...cardData };
+        delete submissionData._changedFields; // internal field
+        id = submissionData.id;
         const entity = await fetch(`https://repo-prod.prod.sagebase.org/repo/v1/entity/${id}`, {
               method: 'GET',
               headers: {
@@ -283,9 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let annotations = { 
             "id": id, 
             "etag": entityData.etag, 
-            "annotations": asAnnotations(cardData)}
-        
-        // console.log("Submitting", annotations)
+            "annotations": asAnnotations(submissionData)}
 
         response = await fetch(`https://repo-prod.prod.sagebase.org/repo/v1/entity/${id}/annotations2`, {
             method: 'PUT',
@@ -300,7 +301,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('Annotation submitted successfully');
             return true;
         } else {
-            console.error('Failed to submit annotation');
+            console.error('Failed to submit annotations');
         }
     }
 
@@ -398,15 +399,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Function to save changes made to the card
     function saveCardChanges() {
         if (!window.currentForm) {
-            console.error("Form not found");
-            return;
+          console.error("Form not found");
+          return;
         }
         
         // Extract data from the form
         const formData = extractFormData(window.currentForm);
         if (!formData) {
-            console.error("Could not extract form data");
-            return;
+          console.error("Could not extract form data");
+          return;
         }
         
         console.log('Original data:', originalCardData);
@@ -414,78 +415,91 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Ensure the ID is preserved from the original card
         if (originalCardData && originalCardData.id) {
-            formData.id = originalCardData.id;
+          formData.id = originalCardData.id;
         }
         
         // Get the set index from the original data
         const setIndex = originalCardData._setIndex;
         if (setIndex === undefined) {
-            console.error("Missing set index, cannot update card correctly");
-            alert("Error: Cannot identify which set this card belongs to");
-            return;
+          console.error("Missing set index, cannot update card correctly");
+          alert("Error: Cannot identify which set this card belongs to");
+          return;
         }
         
         // Detect which fields were actually changed by user (ignoring auto-filled nulls)
-        changedFields = detectActualChanges(originalCardData, formData);
+        const newChangedFields = detectActualChanges(originalCardData, formData);
         
         // Log the changes
-        console.log(`Changed fields for card ID ${formData.id} in Set ${["A", "B", "C"][setIndex]}:`, changedFields);
+        console.log(`Changed fields for card ID ${formData.id} in Set ${["A", "B", "C"][setIndex]}:`, newChangedFields);
         
-        // IMPORTANT: First update the original card in its set
-        // This is the authoritative data source
+        // IMPORTANT: First update the original card (the authoritative data source) in its set
         let updatedInSet = false;
         const targetId = formData.id;
         
         // Navigate to the specific set and find the card by ID within that set
         if (cardSets[setIndex]) {
-            for (let cardIndex = 0; cardIndex < cardSets[setIndex].length; cardIndex++) {
-                if (cardSets[setIndex][cardIndex].id === targetId) {
-                    console.log(`Found card in Set ${["A", "B", "C"][setIndex]} at index ${cardIndex}`);
-                    
-                    // Create a clean copy of the form data (without our internal properties)
-                    const cleanData = { ...formData };
-                    delete cleanData._setIndex; // Remove our tracking property
-                    
-                    // Update the card with the clean data
-                    cardSets[setIndex][cardIndex] = cleanData;
-                    
-                    updatedInSet = true;
-                    break;
+          for (let cardIndex = 0; cardIndex < cardSets[setIndex].length; cardIndex++) {
+            if (cardSets[setIndex][cardIndex].id === targetId) {
+              console.log(`Found card in Set ${["A", "B", "C"][setIndex]} at index ${cardIndex}`);
+              
+              // Create a clean copy of the form data (without our internal properties)
+              const cleanData = { ...formData };
+              delete cleanData._setIndex; // Remove our tracking property
+              
+              // Get the current accumulated changed fields or initialize empty array
+              let accumulatedChanges = cardSets[setIndex][cardIndex]._changedFields || [];
+              
+              // Add new changed fields that aren't already tracked
+              newChangedFields.forEach(field => {
+                if (!accumulatedChanges.includes(field)) {
+                  accumulatedChanges.push(field);
                 }
+              });
+              
+              // Store the accumulated changes back in the card
+              cleanData._changedFields = accumulatedChanges;
+              
+              // Update the card with the clean data
+              cardSets[setIndex][cardIndex] = cleanData;
+              
+              // Remember these changes for the current submission cycle
+              changedFields = [...accumulatedChanges]; // Copy the accumulated changes
+              
+              updatedInSet = true;
+              break;
             }
+          }
         }
         
         if (!updatedInSet) {
-            console.error(`Could not find card with ID ${targetId} in Set ${["A", "B", "C"][setIndex]}`);
-            alert("Error: Card could not be found in its original set");
-            return;
+          console.error(`Could not find card with ID ${targetId} in Set ${["A", "B", "C"][setIndex]}`);
+          alert("Error: Card could not be found in its original set");
+          return;
         }
         
         // Now update the card in the current display order if it's visible
         let updatedInDisplay = false;
         
         for (let i = 0; i < currentDisplayOrder.length; i++) {
-            // We need to match BOTH the ID and the original set index
-            if (currentDisplayOrder[i].card.id === targetId && 
-                currentDisplayOrder[i].originalIndex === setIndex) {
-                
-                console.log(`Found card in display order at index ${i}`);
-                
-                // Create a clean copy of the form data
-                const cleanData = { ...formData };
-                delete cleanData._setIndex; // Remove our tracking property
-                
-                // Update the card with the clean data
-                currentDisplayOrder[i].card = cleanData;
-                
-                updatedInDisplay = true;
-                break;
-            }
-        }
-        
-        if (!updatedInDisplay) {
-            console.warn(`Could not find card with ID ${targetId} from Set ${["A", "B", "C"][setIndex]} in current display order`);
-            // Not critical - the card might not be visible in the current comparison
+          // We need to match BOTH the ID and the original set index
+          if (currentDisplayOrder[i].card.id === targetId && 
+              currentDisplayOrder[i].originalIndex === setIndex) {
+            
+            console.log(`Found card in display order at index ${i}`);
+            
+            // Create a clean copy of the form data 
+            const cleanData = { ...formData };
+            delete cleanData._setIndex; // Remove our tracking property
+            
+            // Preserve the accumulated changes
+            cleanData._changedFields = cardSets[setIndex].find(c => c.id === targetId)._changedFields;
+            
+            // Update the card with the clean data
+            currentDisplayOrder[i].card = cleanData;
+            
+            updatedInDisplay = true;
+            break;
+          }
         }
         
         // Cleanup
@@ -978,6 +992,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
         // Record results, mapping scores back to original A, B, C
         const currentIndex = currentState.currentIndex;
+        const highestCard = getHighestScoringCard(scores, currentIndex);
+        const cardChanges = highestCard.card._changedFields || [];
         const result = {
             user: username,
             comparisonIndex: currentIndex,
@@ -989,7 +1005,7 @@ document.addEventListener('DOMContentLoaded', () => {
             scoreC: scores[2],              // Score given to original card C
             notes: notesText,               // Notes from the textarea
             timestamp: new Date().toISOString(),
-            changed: changedFields.length > 0 ? changedFields : undefined // Add changed fields if any
+            changed: cardChanges.length > 0 ? cardChanges : undefined
         };
         
         // Disable form during submission
@@ -1012,7 +1028,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Find the highest-scoring card and submit it
                 submitStatusEl.textContent = "Submitting highest-scoring card...";
-                const highestCard = getHighestScoringCard(scores, currentIndex);
                 
                 if (highestCard) {
                     try {
@@ -1165,7 +1180,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // *** Success! Assign data and initialize ***
-            cardSets = loadedSets;
+            cardSets = loadedSets.map(set => 
+                set.map(card => {
+                  // Create a deep copy to avoid modifying the original
+                  const newCard = JSON.parse(JSON.stringify(card));
+                  // Initialize _changedFields if it doesn't exist
+                  if (!newCard._changedFields) {
+                    newCard._changedFields = [];
+                  }
+                  return newCard;
+                })
+              );
             totalComparisons = firstSetLength;
             dataIsValid = true; // Mark data as valid
 
